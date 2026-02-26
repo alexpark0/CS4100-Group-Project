@@ -1,6 +1,6 @@
 ### CS4100 Group Project SP26
 
-## Movie recommendation model using CNN model and LLM to generate plot descriptions.
+## Movie recommendation model using CNN and LLM to generate plot descriptions.
 
 With so many movies out there and the length of a movie being such a large time commitment, 
 it is difficult to find a new movie that you might like. It’s also sometimes a struggle to 
