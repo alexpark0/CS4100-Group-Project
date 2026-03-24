@@ -80,33 +80,31 @@ def rewrite_plot(plot: str, title: str = "", style: str = "concise and engaging"
 
 
 # ---------------------------------------------------------------------------
-# 2.  Generate a new plot description from movie metadata
+# 2.  Generate 10 keywords describing a movie plot
 # ---------------------------------------------------------------------------
 
-def generate_plot_description(metadata: dict) -> str:
+def generate_plot_keywords(plot: str, title: str = "") -> list[str]:
     """
-    Generate a plot-style description from structured movie metadata.
+    Generate 10 keywords that describe a movie plot.
 
     Args:
-        metadata: A dict with keys like Title, Genre, Director, Actors, Year, etc.
-                  (matches the shape returned by omdbAPIs functions).
+        plot:  The plot text (from OMDB's 'Plot' field or similar).
+        title: Optional movie title for context.
 
     Returns:
-        A generated plot description string.
+        A list of exactly 10 keyword strings.
     """
     system = (
-        "You are a creative film synopsis writer. Given structured metadata "
-        "about a movie, write an original, spoiler-free plot description "
-        "(3-6 sentences) that captures the genre, tone, and premise. "
-        "Do NOT copy any existing synopsis verbatim."
+        "You are a film analyst AI. Given a movie plot, output exactly 10 "
+        "single-word or short-phrase keywords that best describe the plot's "
+        "themes, tone, setting, and key elements. "
+        "Return ONLY the 10 keywords as a comma-separated list with no "
+        "numbering, bullet points, or extra text."
     )
-
-    # Build a readable metadata block
-    fields = ["Title", "Year", "Genre", "Director", "Actors", "Language", "Country", "Awards"]
-    lines = [f"{k}: {metadata[k]}" for k in fields if k in metadata and metadata[k] != "N/A"]
-    user = "\n".join(lines)
-
-    return _chat(system, user, temperature=0.8)
+    user = f"Movie: {title}\n\nPlot:\n{plot}" if title else plot
+    raw = _chat(system, user, temperature=0.5, max_tokens=128)
+    keywords = [kw.strip() for kw in raw.split(",") if kw.strip()]
+    return keywords[:10]
 
 
 # ---------------------------------------------------------------------------
@@ -150,9 +148,9 @@ if __name__ == "__main__":
     print(rewrite_plot(movie["Plot"], movie["Title"]))
     print()
 
-    # --- Generate from metadata ---
-    print("=== Generated Description ===")
-    print(generate_plot_description(movie))
+    # --- Generate keywords ---
+    print("=== Plot Keywords ===")
+    print(generate_plot_keywords(movie["Plot"], movie["Title"]))
     print()
 
     # --- Vibe comparison ---
