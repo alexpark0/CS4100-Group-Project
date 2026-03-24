@@ -10,8 +10,3 @@ user preferences, but some people remain unsatisfied with those recommendations 
 of what they want to watch next. A good movie recommendation model with customizable inputs can solve this problem.
 
 Alex Park, Shariq Rifai, Haozhe Shi
-
-To-do:
-- way to evaluate model
-- meet with Raj about LLM plot comparison
-- plan group work
