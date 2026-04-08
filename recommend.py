@@ -1,208 +1,264 @@
+#!/usr/bin/env python3
 """
-recommend.py  –  CS4100 Movie Recommendation CLI
-=================================================
-
-Run with:
-    python recommend.py
-
-Flow
-----
-1. Enter 1+ movies you already like (fetched from OMDB + LLM keywords).
-2. Optionally lock a genre constraint (e.g. "Sci-Fi").
-3. The system scores every candidate against your profile using the
-   heuristic scorer + neural network and presents the best match.
-4. Reply y / n:
-     y → great, enjoy!  (NN trains on positive feedback)
-     n → try again      (NN trains on negative feedback, next-best shown)
-     q → quit
+recommend.py  --  Interactive Movie Recommendation CLI
+=====================================================
+CS4100 Group Project  |  Park, Rifai, Shi
 """
 
 import sys
 from main import build_movie_row
-from nn_model import MovieRecommender, compute_heuristic_score
+from omdbAPIs import search_movies
+from nn_model import MovieRecommender, compute_heuristic_score, ALL_GENRES
 
-# ---------------------------------------------------------------------------
-# Candidate pool  –  a curated set of well-known movies spanning all genres.
-# OMDB title-search is keyword-only (not genre-searchable), so we maintain a
-# fixed pool and fetch full profiles on demand.
-# ---------------------------------------------------------------------------
-CANDIDATE_TITLES = [
-    # Action / Adventure
-    "Mad Max: Fury Road", "John Wick", "The Dark Knight", "Die Hard",
-    "Mission: Impossible – Fallout", "Top Gun: Maverick", "Gladiator",
-    "The Avengers", "Black Panther", "Spider-Man: Into the Spider-Verse",
-    # Sci-Fi
-    "Interstellar", "The Matrix", "Blade Runner 2049", "Arrival",
-    "Ex Machina", "2001: A Space Odyssey", "Gravity", "Dune",
-    # Thriller / Mystery
-    "Se7en", "Gone Girl", "Parasite", "Knives Out", "Prisoners",
-    "Zodiac", "Memento", "Oldboy", "The Silence of the Lambs",
-    # Drama
-    "The Shawshank Redemption", "Schindler's List", "Forrest Gump",
-    "The Godfather", "12 Angry Men", "Whiplash", "A Beautiful Mind",
-    "Good Will Hunting", "The Social Network", "Marriage Story",
-    # Comedy
-    "The Grand Budapest Hotel", "Superbad", "Game Night",
-    "Knives Out", "About Time", "The Princess Bride",
-    # Romance
-    "Eternal Sunshine of the Spotless Mind", "La La Land",
-    "Before Sunrise", "Titanic", "Crazy Rich Asians",
-    # Horror
-    "Get Out", "Hereditary", "A Quiet Place", "The Conjuring",
-    "It Follows", "Midsommar", "The Shining",
-    # Animation
-    "Spirited Away", "WALL-E", "Inside Out", "Coco",
-    "Princess Mononoke", "Your Name",
-    # Crime
-    "Pulp Fiction", "No Country for Old Men", "Goodfellas",
-    "The Departed", "Heat", "Fargo",
-    # War / History
-    "Dunkirk", "1917", "Saving Private Ryan", "Apocalypse Now",
-    "Full Metal Jacket",
-]
+# ── Display helpers ──────────────────────────────────────────────────
+
+WIDTH = 52
+
+def banner():
+    print()
+    print("=" * WIDTH)
+    print("   CS4100 Movie Recommender")
+    print("   Park  |  Rifai  |  Shi")
+    print("=" * WIDTH)
+    print()
+    print("  How it works:")
+    print("  1. Enter movies you already like")
+    print("  2. Optionally lock to a genre")
+    print("  3. Get personalized recommendations")
+    print("  4. Give feedback so the model learns")
+    print()
 
 
-def _fetch_profile(title: str) -> dict | None:
-    """Return a normalized movie profile dict, or None on error."""
-    try:
-        return build_movie_row(title)
-    except Exception as e:
-        print(f"  [warning] Could not fetch '{title}': {e}")
-        return None
+def star_bar(rating, max_rating=10):
+    filled = int(round(rating))
+    return "*" * filled + "-" * (max_rating - filled)
 
 
-def _display_recommendation(movie: dict, score_breakdown: dict, nn_prob: float):
-    actors = ", ".join(
-        a for a in [movie.get("actor_1"), movie.get("actor_2"), movie.get("actor_3")]
-        if a and a != "N/A"
-    )
-    keywords = ", ".join(movie.get("plot_keywords", [])[:6]) or "N/A"
+def print_recommendation(cand, score, prob):
+    genres = ", ".join(cand["genres"]) if cand["genres"] else "N/A"
+    cast = [cand.get(f"actor_{i}", "") for i in [1, 2, 3]]
+    cast = [a for a in cast if a and a != "N/A"]
 
     print()
-    print("=" * 56)
-    print(f"  Recommendation: {movie['title']}")
-    print("=" * 56)
-    print(f"  Genre:    {movie.get('genre', 'N/A')}")
-    print(f"  Rating:   {movie.get('rating', 'N/A')}/10  "
-          f"({movie.get('runtime_min', '?')} min)")
-    print(f"  Cast:     {actors or 'N/A'}")
-    print(f"  Keywords: {keywords}")
-    print(f"  Score:    {score_breakdown['total']}  "
-          f"(actor:{score_breakdown['actor']}  "
-          f"genre:{score_breakdown['genre']}  "
-          f"rating:{score_breakdown['rating']}  "
-          f"keyword:{score_breakdown['keyword']})")
-    print(f"  NN confidence: {nn_prob:.0%}")
-    print("-" * 56)
+    print("+" + "-" * WIDTH + "+")
+    print(f"|  RECOMMENDATION: {cand['title']:<{WIDTH - 19}}|")
+    print("+" + "-" * WIDTH + "+")
+    print(f"|  Genres:   {genres:<{WIDTH - 12}}|")
+    print(f"|  Rating:   {cand['rating']}/10  {star_bar(cand['rating']):<{WIDTH - 24}}|")
+    if cand["runtime_min"]:
+        print(f"|  Runtime:  {cand['runtime_min']} min{'':<{WIDTH - 17 - len(str(cand['runtime_min']))}}|")
+    if cast:
+        cast_str = ", ".join(cast)
+        print(f"|  Cast:     {cast_str:<{WIDTH - 12}}|")
+    print("+" + "-" * WIDTH + "+")
+    print(f"|  Match Breakdown{'':<{WIDTH - 17}}|")
+    print(f"|    Actors:   {score['actor']:<5} Keywords: {score['keyword']:<{WIDTH - 29}}|")
+    print(f"|    Genres:   {score['genre']:<5} Rating:   {score['rating']:<{WIDTH - 29}}|")
+    print(f"|    Total:    {score['total']:<5} NN Conf:  {prob:.1%}{'':<{WIDTH - 32}}|")
+    print("+" + "-" * WIDTH + "+")
 
+
+def print_summary(liked_titles, shown_count, accepted):
+    print()
+    print("=" * WIDTH)
+    print("  Session Summary")
+    print("-" * WIDTH)
+    print(f"  Liked movies:       {', '.join(liked_titles)}")
+    print(f"  Recommendations:    {shown_count} shown")
+    if accepted:
+        print(f"  Accepted:           {accepted}")
+    print("=" * WIDTH)
+
+
+# ── Input helpers ────────────────────────────────────────────────────
+
+def prompt_choice(prompt_text, valid):
+    """Keep prompting until input is in the valid set."""
+    while True:
+        choice = input(prompt_text).strip().lower()
+        if choice in valid:
+            return choice
+        print(f"  Please enter one of: {', '.join(valid)}")
+
+
+def get_liked_movies():
+    """Prompt user to enter movie titles they like."""
+    print("--- Add Movies You Like ---")
+    print("  Enter movie titles one at a time.")
+    print("  Press Enter on an empty line when done.\n")
+    liked = []
+    while True:
+        title = input("  Movie title: ").strip()
+        if not title:
+            if not liked:
+                print("  You need at least one movie. Try again.")
+                continue
+            break
+        print(f"    Fetching \"{title}\"...", end=" ", flush=True)
+        try:
+            row = build_movie_row(title)
+            liked.append(row)
+            print(f"OK  [{row['title']}]")
+        except ValueError as e:
+            print(f"NOT FOUND  ({e})")
+        except Exception as e:
+            print(f"ERROR  ({e})")
+    return liked
+
+
+def get_fixed_genres():
+    """Optionally lock recommendations to a genre."""
+    print("\n--- Optional Genre Constraint ---")
+    print(f"  Available: {', '.join(ALL_GENRES[:26])}")
+    genre = input("  Lock to a genre (Enter to skip): ").strip()
+    if not genre:
+        return []
+    # Case-insensitive match
+    for g in ALL_GENRES:
+        if g.lower() == genre.lower():
+            print(f"    Locked to: {g}")
+            return [g]
+    print(f"    \"{genre}\" not recognized, skipping constraint.")
+    return []
+
+
+# ── Candidate search ─────────────────────────────────────────────────
+
+def find_candidates(liked_rows, exclude_titles):
+    """Search OMDB for candidate movies based on liked movie attributes."""
+    seen = set(t.lower() for t in exclude_titles)
+    candidates = []
+
+    # Collect search terms from liked movies
+    genres = set()
+    actors = set()
+    for row in liked_rows:
+        for g in row.get("genres", []):
+            genres.add(g)
+        for i in [1, 2, 3]:
+            a = row.get(f"actor_{i}", "").strip()
+            if a and a != "N/A":
+                actors.add(a)
+
+    search_terms = list(genres)[:2] + list(actors)[:2]
+    total = len(search_terms)
+
+    for idx, term in enumerate(search_terms, 1):
+        print(f"  Searching [{idx}/{total}] \"{term}\"...", end=" ", flush=True)
+        try:
+            results = search_movies(term)
+        except Exception:
+            print("failed")
+            continue
+
+        added = 0
+        for r in results:
+            if added >= 3:  # limit per term to save API quota
+                break
+            title = r.get("Title", "")
+            if not title or title.lower() in seen:
+                continue
+            try:
+                row = build_movie_row(title)
+                candidates.append(row)
+                seen.add(title.lower())
+                added += 1
+            except Exception:
+                pass
+        print(f"{added} found")
+
+    return candidates
+
+
+# ── Main loop ─────────────────────────────────────────────────────────
 
 def run():
+    banner()
     rec = MovieRecommender()
 
-    # ------------------------------------------------------------------
-    # Step 1: collect liked movies
-    # ------------------------------------------------------------------
-    print()
-    print("=" * 56)
-    print("  CS4100 Movie Recommender")
-    print("=" * 56)
-    print("Enter movies you already like (blank line when done):")
+    liked = get_liked_movies()
+    liked_titles = [r["title"] for r in liked]
+    print(f"\n  Profile built from {len(liked)} movie(s).")
 
-    liked: list[dict] = []
+    fixed_genres = get_fixed_genres()
+
+    rejected = set(t.lower() for t in liked_titles)
+    shown_count = 0
+    accepted = None
+
     while True:
-        raw = input("  > ").strip()
-        if not raw:
-            if not liked:
-                print("  Please enter at least one movie.")
+        print("\n--- Finding Recommendations ---")
+        candidates = find_candidates(liked, rejected)
+
+        if not candidates:
+            print("\n  No candidates found.")
+            choice = prompt_choice(
+                "  [a] Add more movies  [q] Quit\n  > ", {"a", "q"}
+            )
+            if choice == "a":
+                extra = get_liked_movies()
+                liked.extend(extra)
+                liked_titles.extend(r["title"] for r in extra)
                 continue
             break
-        profile = _fetch_profile(raw)
-        if profile:
-            liked.append(profile)
-            print(f"  Added: {profile['title']}  "
-                  f"[{profile.get('genre', '')}  {profile.get('rating', '')}]")
 
-    # ------------------------------------------------------------------
-    # Step 2: optional fixed genre constraint
-    # ------------------------------------------------------------------
-    print()
-    raw_genre = input(
-        "Lock a genre? (e.g. Sci-Fi, Horror — press Enter to skip): "
-    ).strip()
-    fixed_genres = [g.strip() for g in raw_genre.split(",") if g.strip()]
-    if fixed_genres:
-        print(f"  Genre filter: {', '.join(fixed_genres)}")
-
-    # ------------------------------------------------------------------
-    # Step 3: fetch + score all candidates (lazy: on first use)
-    # ------------------------------------------------------------------
-    liked_titles_lower = {m["title"].lower() for m in liked}
-    rejected_titles_lower: set[str] = set()
-
-    print()
-    print("Fetching candidate movies …  (this may take a moment)")
-
-    candidates: list[dict] = []
-    for title in CANDIDATE_TITLES:
-        if title.lower() in liked_titles_lower:
-            continue
-        p = _fetch_profile(title)
-        if p:
-            candidates.append(p)
-
-    if not candidates:
-        print("No candidates available. Exiting.")
-        return
-
-    # ------------------------------------------------------------------
-    # Step 4: recommendation loop
-    # ------------------------------------------------------------------
-    while True:
-        # Score remaining candidates (skip rejected)
+        # Score and rank
         scored = []
         for cand in candidates:
-            if cand["title"].lower() in rejected_titles_lower:
-                continue
             sb = compute_heuristic_score(cand, liked, fixed_genres or None)
-            if sb["total"] == -1:          # failed fixed-genre filter
+            if sb["total"] == -1:
                 continue
-            nn_prob = rec.score(cand, sb)
-            scored.append((cand, sb, nn_prob))
+            prob = rec.score(cand, sb)
+            scored.append((cand, sb, prob))
 
         if not scored:
-            print("\nNo more candidates match your preferences. "
-                  "Try relaxing the genre filter or adding more liked movies.")
+            print("  No candidates matched your genre constraint.")
+            choice = prompt_choice(
+                "  [c] Change genre  [a] Add movies  [q] Quit\n  > ",
+                {"c", "a", "q"},
+            )
+            if choice == "c":
+                fixed_genres = get_fixed_genres()
+                continue
+            elif choice == "a":
+                extra = get_liked_movies()
+                liked.extend(extra)
+                liked_titles.extend(r["title"] for r in extra)
+                continue
             break
 
-        # Sort by NN probability descending
         scored.sort(key=lambda x: x[2], reverse=True)
         best_cand, best_sb, best_prob = scored[0]
+        shown_count += 1
 
-        _display_recommendation(best_cand, best_sb, best_prob)
+        print_recommendation(best_cand, best_sb, best_prob)
 
-        reply = input("  Like this recommendation? (y / n / q): ").strip().lower()
+        choice = prompt_choice(
+            "\n  [y] Yes, I'd watch this  [n] No, next  [q] Quit\n  > ",
+            {"y", "n", "q", "yes", "no", "quit"},
+        )
 
-        if reply == "q":
-            print("\nGoodbye!")
+        if choice in ("q", "quit"):
             break
-
-        elif reply == "y":
+        elif choice in ("y", "yes"):
             rec.update(best_cand, best_sb, liked=True)
-            print(f"\nEnjoy '{best_cand['title']}'!")
+            accepted = best_cand["title"]
+            print(f"\n  Great choice! Enjoy \"{accepted}\".")
             break
-
-        elif reply == "n":
-            rec.update(best_cand, best_sb, liked=False)
-            rejected_titles_lower.add(best_cand["title"].lower())
-            print("Got it — finding another recommendation …")
-
         else:
-            print("  Please enter y, n, or q.")
+            rec.update(best_cand, best_sb, liked=False)
+            rejected.add(best_cand["title"].lower())
+            print("  Noted. Finding another...")
 
+    print_summary(liked_titles, shown_count, accepted)
+    print("  Thanks for using the recommender!\n")
+
+
+# ── Entry point ──────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     try:
         run()
     except KeyboardInterrupt:
-        print("\n\nInterrupted.")
+        print("\n\n  Interrupted. Goodbye!")
         sys.exit(0)

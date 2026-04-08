@@ -42,16 +42,20 @@ client = OpenAI(
 
 def _chat(system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 1024) -> str:
     """Send a chat completion request and return the assistant's text."""
-    response = client.chat.completions.create(
-        model=LLM_MODEL,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    )
-    return response.choices[0].message.content.strip()
+    try:
+        response = client.chat.completions.create(
+            model=LLM_MODEL,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"  [LLM warning] API call failed: {e}")
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +107,8 @@ def generate_plot_keywords(plot: str, title: str = "") -> list[str]:
     )
     user = f"Movie: {title}\n\nPlot:\n{plot}" if title else plot
     raw = _chat(system, user, temperature=0.5, max_tokens=128)
+    if not raw:
+        return []
     keywords = [kw.strip() for kw in raw.split(",") if kw.strip()]
     return keywords[:10]
 

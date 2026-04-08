@@ -1,0 +1,5 @@
+.env
+__pycache__/
+*.pyc
+nn_weights.pt
+feedback_log.json

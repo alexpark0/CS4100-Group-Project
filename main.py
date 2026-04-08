@@ -1,4 +1,3 @@
-import pandas as pd
 from omdbAPIs import get_movie_by_title
 from llmAPIs import generate_plot_keywords
 
@@ -34,7 +33,10 @@ def build_movie_row(title: str) -> dict:
     except (ValueError, IndexError):
         runtime_min = 0
 
-    keywords = generate_plot_keywords(movie.get("Plot", ""), movie.get("Title", title))
+    try:
+        keywords = generate_plot_keywords(movie.get("Plot", ""), movie.get("Title", title))
+    except Exception:
+        keywords = []
 
     return {
         "title":        movie.get("Title", title),
@@ -50,6 +52,7 @@ def build_movie_row(title: str) -> dict:
 
 
 if __name__ == "__main__":
+    import pandas as pd
     titles = ["Inception", "The Dark Knight", "Interstellar"]
 
     rows = [build_movie_row(t) for t in titles]
